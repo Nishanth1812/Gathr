@@ -1,0 +1,11 @@
+Flask==2.3.3
+flask-socketio==5.3.6
+eventlet==0.35.1
+stripe==8.9.0
+flask-pymongo==2.3.0
+python-dotenv==1.0.1
+aiortc==1.5.0
+opencv-python==4.9.0.80
+gunicorn==21.2.0
+requests==2.31.0
+flask-cors==4.0.0
