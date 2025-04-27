@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch & Donate - Gala Giving Tree</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .stream-panel {
+            flex: 3;
+            background-color: #222;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .donation-panel {
+            flex: 1;
+            background-color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2 {
+            color: #2d5a27;
+        }
+        .video-container {
+            background-color: #000;
+            flex-grow: 1;
+            position: relative;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .offline-message {
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .donation-form {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #2d5a27;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #1d3a17;
+        }
+        .donation-stats {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+        }
+        
+        /* Tree styling */
+        .tree-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            margin-top: 20px;
+        }
+        .branch {
+            position: absolute;
+            width: 120px;
+            height: 40px;
+            background: #2d5a27;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        .branch-label {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 5px;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 0.8em;
+        }
+        #branch-0 { transform: rotate(-30deg) translateX(60px) translateY(20px); }
+        #branch-1 { transform: rotate(-15deg) translateX(70px) translateY(60px); }
+        #branch-2 { transform: rotate(0deg) translateX(80px) translateY(100px); }
+        #branch-3 { transform: rotate(15deg) translateX(70px) translateY(140px); }
+        #branch-4 { transform: rotate(30deg) translateX(60px) translateY(180px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="stream-panel">
+            <h1>Gala Live Stream</h1>
+            <div class="video-container">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="offline-message" id="offlineMessage">
+                    Stream is currently offline.<br>
+                    Please wait for the broadcaster to start streaming.
+                </div>
+            </div>
+        </div>
+        
+        <div class="donation-panel">
+            <h2>Make a Donation</h2>
+            <div class="donation-form">
+                <div class="form-group">
+                    <label for="donorName">Your Name</label>
+                    <input type="text" id="donorName" placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label for="donationAmount">Amount ($)</label>
+                    <select id="donationAmount">
+                        <option value="5">$5</option>
+                        <option value="10">$10</option>
+                        <option value="25">$25</option>
+                        <option value="50">$50</option>
+                        <option value="100">$100</option>
+                        <option value="custom">Custom Amount</option>
+                    </select>
+                </div>
+                <div class="form-group" id="customAmountGroup" style="display:none;">
+                    <label for="customAmount">Custom Amount ($)</label>
+                    <input type="number" id="customAmount" min="1" step="1" placeholder="Enter amount">
+                </div>
+                <button id="donateButton">Donate Now</button>
+            </div>
+            
+            <div class="donation-stats">
+                <h3>Total Donations: $<span id="totalAmount">0.00</span></h3>
+            </div>
+            
+            <h2>Giving Tree</h2>
+            <div class="tree-container">
+                <div id="branch-0" class="branch"></div>
+                <div id="branch-1" class="branch"></div>
+                <div id="branch-2" class="branch"></div>
+                <div id="branch-3" class="branch"></div>
+                <div id="branch-4" class="branch"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        // Connect to Socket.IO server
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: Infinity
+        });
+        
+        // Stripe initialization
+        const stripe = Stripe('{{ stripe_key }}');
+        // Replace with your actual key
+        
+        // WebRTC variables
+        let peerConnection;
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+        
+        // DOM elements
+        const remoteVideo = document.getElementById('remoteVideo');
+        const offlineMessage = document.getElementById('offlineMessage');
+        const donorNameInput = document.getElementById('donorName');
+        const donationAmountSelect = document.getElementById('donationAmount');
+        const customAmountGroup = document.getElementById('customAmountGroup');
+        const customAmountInput = document.getElementById('customAmount');
+        const donateButton = document.getElementById('donateButton');
+        const totalAmount = document.getElementById('totalAmount');
+        
+        // Show/hide custom amount input
+        donationAmountSelect.addEventListener('change', function() {
+            if (this.value === 'custom') {
+                customAmountGroup.style.display = 'block';
+            } else {
+                customAmountGroup.style.display = 'none';
+            }
+        });
+        
+        // Handle donation button click
+        donateButton.addEventListener('click', async function() {
+            const name = donorNameInput.value.trim() || 'Anonymous';
+            let amount;
+            
+            if (donationAmountSelect.value === 'custom') {
+                amount = parseFloat(customAmountInput.value);
+                if (isNaN(amount) || amount <= 0) {
+                    alert('Please enter a valid donation amount');
+                    return;
+                }
+            } else {
+                amount = parseFloat(donationAmountSelect.value);
+            }
+            
+            try {
+                // In a real implementation, this would redirect to Stripe Checkout
+                // For demo purposes, we'll simulate a successful donation
+                processDonation(name, amount);
+            } catch (error) {
+                console.error('Error processing donation:', error);
+                alert('Error processing donation. Please try again.');
+            }
+        });
+        
+        // Function to process donation (simulated for demo)
+        // Function to process donation using Stripe
+async function processDonation(name, amount) {
+    try {
+        // Create a checkout session through our backend
+        const response = await fetch('/create-checkout-session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                name: name,
+                amount: amount
+            }),
+        });
+        
+        const session = await response.json();
+        
+        if (session.error) {
+            throw new Error(session.error);
+        }
+        
+        // Redirect to Stripe Checkout
+        const result = await stripe.redirectToCheckout({
+            sessionId: session.id
+        });
+        
+        if (result.error) {
+            throw new Error(result.error.message);
+        }
+    } catch (error) {
+        console.error('Error processing donation:', error);
+        alert('Error processing donation. Please try again.');
+    }
+
+            
+            // Clear form
+            donorNameInput.value = '';
+            donationAmountSelect.value = '10';
+            customAmountInput.value = '';
+            customAmountGroup.style.display = 'none';
+            
+            alert(`Thank you for your donation of $${amount.toFixed(2)}!`);
+        }
+        
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('join_stream');
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            resetVideoConnection();
+        });
+        
+        socket.on('stream_available', () => {
+            console.log('Stream is available');
+            // No action needed - we'll wait for the offer
+        });
+        
+        socket.on('stream_ended', () => {
+            console.log('Stream has ended');
+            resetVideoConnection();
+        });
+        
+        socket.on('stream_offer', async (data) => {
+            try {
+                await setupPeerConnection();
+                
+                const offer = data.offer;
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                socket.emit('viewer_answer', {
+                    viewerId: socket.id,
+                    answer: answer
+                });
+                
+                offlineMessage.style.display = 'none';
+                remoteVideo.style.display = 'block';
+            } catch (error) {
+                console.error('Error handling stream offer:', error);
+            }
+        });
+        
+        socket.on('ice_candidate', async (data) => {
+            try {
+                if (peerConnection) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                }
+            } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+            }
+        });
+        
+        socket.on('initial_tree_state', (state) => {
+            // Update total donations
+            totalAmount.textContent = state.total_donations.toFixed(2);
+            
+            // Update branches
+            state.branches.forEach((status, index) => {
+                if (status !== 'empty') {
+                    // Find donor info if available
+                    const donor = state.recent_donors.find(d => d.branch_index === index);
+                    if (donor) {
+                        document.getElementById(`branch-${index}`).innerHTML = `
+                            <div class="branch-label">
+                                <strong>${donor.name}</strong><br>
+                                $${donor.amount.toFixed(2)}
+                            </div>
+                        `;
+                    }
+                }
+            });
+        });
+        
+        socket.on('new_donor_label', (data) => {
+            const branch = document.getElementById(`branch-${data.branchIndex}`);
+            if (branch) {
+                branch.innerHTML = `
+                    <div class="branch-label">
+                        <strong>${data.name}</strong><br>
+                        $${data.amount.toFixed(2)}
+                    </div>
+                `;
+                branch.style.transform += ' scale(1.1)';
+                setTimeout(() => {
+                    branch.style.transform = branch.style.transform.replace(' scale(1.1)', '');
+                }, 300);
+            }
+            
+            // Update total amount
+            let current = parseFloat(totalAmount.textContent);
+            totalAmount.textContent = (current + data.amount).toFixed(2);
+        });
+        
+        async function setupPeerConnection() {
+            // Close any existing connection
+            if (peerConnection) {
+                peerConnection.close();
+            }
+            
+            // Create new connection
+            peerConnection = new RTCPeerConnection(config);
+            
+            // Set up event handlers
+            peerConnection.ontrack = event => {
+                if (event.streams && event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
+            
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('ice_candidate', {
+                        target: 'broadcaster',
+                        candidate: event.candidate
+                    });
+                }
+            };
+            
+            peerConnection.onconnectionstatechange = () => {
+                if (peerConnection.connectionState === 'disconnected' || 
+                    peerConnection.connectionState === 'failed') {
+                    resetVideoConnection();
+                }
+            };
+            
+            return peerConnection;
+        }
+        
+        function resetVideoConnection() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            remoteVideo.srcObject = null;
+            remoteVideo.style.display = 'none';
+            offlineMessage.style.display = 'block';
+        }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            socket.emit('leave_stream');
+            if (peerConnection) {
+                peerConnection.close();
+            }
+        });
+    </script>
+</body>
+</html>

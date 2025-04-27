@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Broadcast - Gala Giving Tree</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .broadcast-panel {
+            flex: 3;
+            background-color: #222;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .tree-panel {
+            flex: 1;
+            background-color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2 {
+            color: #2d5a27;
+        }
+        .video-container {
+            background-color: #000;
+            flex-grow: 1;
+            position: relative;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .controls {
+            padding: 15px;
+            background-color: rgba(45, 90, 39, 0.9);
+            border-radius: 8px;
+            color: white;
+        }
+        button {
+            background-color: #ff4d4d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #e60000;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+        }
+        /* Tree styling */
+        .tree-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            margin-top: 20px;
+        }
+        .branch {
+            position: absolute;
+            width: 120px;
+            height: 40px;
+            background: #2d5a27;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        .branch-label {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 5px;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 0.8em;
+        }
+        #branch-0 { transform: rotate(-30deg) translateX(60px) translateY(20px); }
+        #branch-1 { transform: rotate(-15deg) translateX(70px) translateY(60px); }
+        #branch-2 { transform: rotate(0deg) translateX(80px) translateY(100px); }
+        #branch-3 { transform: rotate(15deg) translateX(70px) translateY(140px); }
+        #branch-4 { transform: rotate(30deg) translateX(60px) translateY(180px); }
+        
+        .donation-stats {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="broadcast-panel">
+            <h1>Broadcast Panel</h1>
+            <div class="video-container">
+                <video id="localVideo" autoplay muted playsinline></video>
+            </div>
+            <div class="controls">
+                <button id="startButton">Start Broadcasting</button>
+                <button id="stopButton" style="display:none;">Stop Broadcasting</button>
+                <div class="status" id="statusMessage">Not broadcasting</div>
+            </div>
+        </div>
+        
+        <div class="tree-panel">
+            <h2>Giving Tree</h2>
+            <div class="donation-stats">
+                <h3>Total Donations: $<span id="totalAmount">0.00</span></h3>
+                <div id="viewerCount">Viewers: 0</div>
+            </div>
+            
+            <div class="tree-container">
+                <div id="branch-0" class="branch"></div>
+                <div id="branch-1" class="branch"></div>
+                <div id="branch-2" class="branch"></div>
+                <div id="branch-3" class="branch"></div>
+                <div id="branch-4" class="branch"></div>
+            </div>
+            
+            <div id="recentDonors">
+                <h3>Recent Donors</h3>
+                <ul id="donorsList"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        // Connect to Socket.IO server
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: Infinity
+        });
+        
+        // WebRTC variables
+        let localStream;
+        let peerConnections = {};
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+        
+        // DOM elements
+        const localVideo = document.getElementById('localVideo');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const totalAmount = document.getElementById('totalAmount');
+        const viewerCount = document.getElementById('viewerCount');
+        const donorsList = document.getElementById('donorsList');
+        
+        // UI handling
+        startButton.addEventListener('click', startBroadcast);
+        stopButton.addEventListener('click', stopBroadcast);
+        
+        let viewers = 0;
+        
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            viewers = 0;
+            updateViewerCount();
+        });
+        
+        socket.on('viewer_answer', async (data) => {
+            try {
+                const pc = peerConnections[data.viewerId];
+                if (pc) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    console.log('Processed answer from viewer', data.viewerId);
+                }
+            } catch (error) {
+                console.error('Error handling viewer answer:', error);
+            }
+        });
+        
+        socket.on('ice_candidate', async (data) => {
+            try {
+                const pc = peerConnections[data.viewerId];
+                if (pc) {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    console.log('Added ICE candidate for viewer', data.viewerId);
+                }
+            } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+            }
+        });
+        
+        socket.on('viewer_joined', (data) => {
+            viewers++;
+            updateViewerCount();
+            createPeerConnection(data.viewerId);
+        });
+        
+        socket.on('viewer_left', (data) => {
+            if (peerConnections[data.viewerId]) {
+                peerConnections[data.viewerId].close();
+                delete peerConnections[data.viewerId];
+                viewers = Math.max(0, viewers - 1);
+                updateViewerCount();
+            }
+        });
+        
+        socket.on('initial_tree_state', (state) => {
+            // Update total donations
+            totalAmount.textContent = state.total_donations.toFixed(2);
+            
+            // Update branches
+            state.branches.forEach((status, index) => {
+                if (status !== 'empty') {
+                    // Find donor info if available
+                    const donor = state.recent_donors.find(d => d.branch_index === index);
+                    if (donor) {
+                        document.getElementById(`branch-${index}`).innerHTML = `
+                            <div class="branch-label">
+                                <strong>${donor.name}</strong><br>
+                                $${donor.amount.toFixed(2)}
+                            </div>
+                        `;
+                    }
+                }
+            });
+            
+            // Update recent donors list
+            updateDonorsList(state.recent_donors);
+        });
+        
+        socket.on('new_donor_label', (data) => {
+            const branch = document.getElementById(`branch-${data.branchIndex}`);
+            if (branch) {
+                branch.innerHTML = `
+                    <div class="branch-label">
+                        <strong>${data.name}</strong><br>
+                        $${data.amount.toFixed(2)}
+                    </div>
+                `;
+                branch.style.transform += ' scale(1.1)';
+                setTimeout(() => {
+                    branch.style.transform = branch.style.transform.replace(' scale(1.1)', '');
+                }, 300);
+            }
+            
+            // Update total amount - assuming this is passed with the event
+            // Alternatively, you could request the current state
+            let current = parseFloat(totalAmount.textContent);
+            totalAmount.textContent = (current + data.amount).toFixed(2);
+            
+            // Add to recent donors list
+            const donorItem = document.createElement('li');
+            donorItem.textContent = `${data.name}: $${data.amount.toFixed(2)}`;
+            donorsList.prepend(donorItem);
+            
+            // Keep only 5 most recent
+            while (donorsList.children.length > 5) {
+                donorsList.removeChild(donorsList.lastChild);
+            }
+        });
+        
+        async function startBroadcast() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                
+                localVideo.srcObject = localStream;
+                
+                startButton.style.display = 'none';
+                stopButton.style.display = 'inline-block';
+                statusMessage.textContent = 'Broadcasting live...';
+                
+                // Inform server we're ready to broadcast
+                socket.emit('broadcaster_ready');
+                
+            } catch (error) {
+                console.error('Error starting broadcast:', error);
+                statusMessage.textContent = 'Failed to start broadcasting: ' + error.message;
+            }
+        }
+        
+        function stopBroadcast() {
+            // Stop all tracks
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localVideo.srcObject = null;
+            }
+            
+            // Close all peer connections
+            Object.values(peerConnections).forEach(pc => pc.close());
+            peerConnections = {};
+            
+            startButton.style.display = 'inline-block';
+            stopButton.style.display = 'none';
+            statusMessage.textContent = 'Broadcast ended';
+            
+            // Inform server broadcast has ended
+            socket.emit('broadcaster_stopped');
+        }
+        
+        async function createPeerConnection(viewerId) {
+            const pc = new RTCPeerConnection(config);
+            peerConnections[viewerId] = pc;
+            
+            // Add local stream tracks to connection
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            
+            // Handle ICE candidates
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('ice_candidate', {
+                        target: viewerId,
+                        candidate: event.candidate
+                    });
+                }
+            };
+            
+            // Create and send offer
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('stream_offer', {
+                    viewerId: viewerId,
+                    offer: pc.localDescription
+                });
+                
+            } catch (error) {
+                console.error('Error creating offer:', error);
+            }
+            
+            return pc;
+        }
+        
+        function updateViewerCount() {
+            viewerCount.textContent = `Viewers: ${viewers}`;
+        }
+        
+        function updateDonorsList(donors) {
+            donorsList.innerHTML = '';
+            donors.slice(0, 5).forEach(donor => {
+                const donorItem = document.createElement('li');
+                donorItem.textContent = `${donor.name}: $${donor.amount.toFixed(2)}`;
+                donorsList.appendChild(donorItem);
+            });
+        }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            stopBroadcast();
+            socket.disconnect();
+        });
+    </script>
+</body>
+</html>
